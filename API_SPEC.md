@@ -457,6 +457,76 @@ GET /api/drives/{driveId}
 
 ---
 
+### 3-4. 음악 추천 조회
+
+```
+GET /api/drives/{driveId}/music
+```
+
+감정 배치 업로드 후 비동기로 생성된 **최신 Spotify 플레이리스트 추천**을 반환합니다.
+
+**Path Variable**
+| 이름 | 타입 | 설명 |
+|------|------|------|
+| driveId | Long | 운전 세션 ID |
+
+**Request Body** 없음
+
+**Response** `200 OK`
+```json
+{
+  "recommendationId": 1,
+  "emotionName": "angry",
+  "genre": "classical",
+  "playlistId": "37i9dQZF1DX4sWSpwq3LiO",
+  "playlistName": "Peaceful Piano",
+  "playlistUrl": "https://open.spotify.com/playlist/37i9dQZF1DX4sWSpwq3LiO",
+  "issuedAt": "2026-03-27T10:00:00"
+}
+```
+
+> - 음악 추천은 이벤트 배치 업로드(4-1) 후 **비동기**로 생성됩니다. 업로드 직후 바로 조회 시 404가 반환될 수 있으며, 잠시 후 재조회하세요.
+> - 감정별 장르 매핑: angry/anger → classical, fear → ambient, sad/sadness → pop(업리프팅), disgust → acoustic, surprise → lo-fi, contempt → jazz, happy → pop(업비트), neutral → lo-fi
+> - `playlistId`, `playlistName`, `playlistUrl`은 Spotify 검색 결과가 없을 경우 `null`일 수 있습니다.
+
+**오류**
+| 상태 코드 | 사유 |
+|-----------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | 본인의 운전 세션이 아님 |
+| 404 | 운전 세션 없음 |
+| 404 | 아직 음악 추천이 생성되지 않음 |
+
+---
+
+### 3-5. 창문 열기 (수동 트리거)
+
+```
+POST /api/drives/{driveId}/window/open
+```
+
+창문 열기를 수동으로 트리거합니다. 졸음(`drowsy`) 감정 감지 시에는 배치 업로드 후 **자동**으로 실행되며, 이 엔드포인트는 테스트 및 외부 시스템 연동용입니다.
+
+> 현재는 서버 로그에 "창문을 엽니다"를 출력하는 임시 구현입니다. 추후 `WindowControlService.openWindow()` 내부에 외부 시스템 연동 로직을 추가합니다.
+
+**Path Variable**
+| 이름 | 타입 | 설명 |
+|------|------|------|
+| driveId | Long | 운전 세션 ID |
+
+**Request Body** 없음
+
+**Response** `204 No Content`
+
+**오류**
+| 상태 코드 | 사유 |
+|-----------|------|
+| 401 | 인증 토큰 없음 또는 만료 |
+| 403 | 본인의 운전 세션이 아님 |
+| 404 | 운전 세션 없음 |
+
+---
+
 ## 4. 이벤트 배치 업로드 API
 
 > JWT 인증 필요
@@ -504,6 +574,7 @@ POST /api/drives/{driveId}/events:batch
 > - `emotions`, `biosignals` 모두 선택 필드이나 최소 하나는 포함 권장
 > - `emotions` 최대 2,000건
 > - `biosignals` 최대 5,000건
+> - 감정 데이터가 포함된 경우 트랜잭션 커밋 후 **비동기**로 GPT-4 코칭 메시지 및 Spotify 음악 추천이 자동 생성됩니다 (`GET /api/drives/{driveId}/music` 로 조회)
 
 **Response** `200 OK`
 ```json

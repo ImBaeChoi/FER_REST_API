@@ -2,6 +2,9 @@ package com.graduation.fer.api.drive;
 
 import com.graduation.fer.api.drive.dto.BatchUploadRequest;
 import com.graduation.fer.api.drive.dto.BatchUploadResponse;
+import com.graduation.fer.coaching.CoachingService;
+import com.graduation.fer.music.SpotifyService;
+import com.graduation.fer.window.WindowControlService;
 import com.graduation.fer.domain.biosignal.BioSignal;
 import com.graduation.fer.domain.biosignal.BioSignalRepository;
 import com.graduation.fer.domain.device.Device;
@@ -14,12 +17,15 @@ import com.graduation.fer.domain.user.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class DriveEventIngestService {
@@ -30,6 +36,9 @@ public class DriveEventIngestService {
     private final EmotionTypeRepository emotionTypeRepository;
     private final EmotionRepository emotionRepository;
     private final BioSignalRepository bioSignalRepository;
+    private final CoachingService coachingService;
+    private final SpotifyService spotifyService;
+    private final WindowControlService windowControlService;
 
     public DriveEventIngestService(
             UserRepository userRepository,
@@ -37,7 +46,10 @@ public class DriveEventIngestService {
             DeviceRepository deviceRepository,
             EmotionTypeRepository emotionTypeRepository,
             EmotionRepository emotionRepository,
-            BioSignalRepository bioSignalRepository
+            BioSignalRepository bioSignalRepository,
+            CoachingService coachingService,
+            SpotifyService spotifyService,
+            WindowControlService windowControlService
     ) {
         this.userRepository = userRepository;
         this.driveSessionRepository = driveSessionRepository;
@@ -45,6 +57,9 @@ public class DriveEventIngestService {
         this.emotionTypeRepository = emotionTypeRepository;
         this.emotionRepository = emotionRepository;
         this.bioSignalRepository = bioSignalRepository;
+        this.coachingService = coachingService;
+        this.spotifyService = spotifyService;
+        this.windowControlService = windowControlService;
     }
 
     @Transactional
@@ -121,6 +136,20 @@ public class DriveEventIngestService {
                 emotionsToSave.add(e);
             }
             emotionRepository.saveAll(emotionsToSave);
+
+            // 트랜잭션 커밋 완료 후 비동기로 GPT-4 코칭 생성
+            List<Long> savedIds = emotionsToSave.stream()
+                    .map(Emotion::getEmotionId)
+                    .collect(Collectors.toList());
+
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    savedIds.forEach(coachingService::generateCoaching);
+                    savedIds.forEach(spotifyService::recommendMusic);
+                    savedIds.forEach(windowControlService::openWindowIfDrowsy);
+                }
+            });
         }
 
         // ===== BioSignals =====

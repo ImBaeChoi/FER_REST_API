@@ -7,7 +7,10 @@ import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "\"AuthSessions\"")
-public class AuthSession {
+public class
+
+
+AuthSession {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

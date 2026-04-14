@@ -1,0 +1,233 @@
+아래는 FER (Facial Emotion Recognition 기반 운전 안전 모니터링) Spring Boot 프로젝트의
+데이터 사전(Data Dictionary)을 작성하기 위한 프롬프트입니다.
+
+======================================================================
+[프롬프트 시작]
+======================================================================
+
+당신은 데이터베이스 설계 전문가입니다.
+아래에 제공되는 프로젝트 설명과 엔티티 정보를 바탕으로 완전한 데이터 사전(Data Dictionary)을 작성해 주세요.
+
+---
+
+## 프로젝트 개요
+
+- 프로젝트명: FER (Facial Emotion Recognition 기반 운전 안전 모니터링 앱)
+- 기술 스택: Spring Boot 4.0.2, Java 17, PostgreSQL, JPA/Hibernate
+- 목적: 운전 중 얼굴 감정 인식 및 생체 신호를 통해 운전자의 감정 상태를 모니터링하고,
+         GPT-4 코칭 메시지 및 Spotify 음악 추천을 제공하는 시스템
+- DB 특이사항:
+  - 모든 테이블명/컬럼명은 PostgreSQL 큰따옴표(") 처리
+  - JSONB 타입 컬럼 존재 (유연한 데이터 저장)
+  - 모든 FK는 LAZY 로딩 전략 사용
+  - spring.jpa.hibernate.ddl-auto=validate (스키마 수동 관리)
+
+---
+
+## 엔티티 목록 및 상세 정보
+
+### 1. Users (사용자)
+- PK: UserId VARCHAR(100)
+- name VARCHAR(100) NOT NULL — 사용자 표시 이름
+- passwordHash VARCHAR(255) NOT NULL — 해시된 비밀번호
+- createdAt TIMESTAMP NOT NULL — 계정 생성 시각
+- updatedAt TIMESTAMP NOT NULL — 마지막 수정 시각
+- 관계: RefreshTokens, Devices, DriveSessions, Emotions, EmotionReports, CoachingEvents, RelabelQueue, BioSignals, MusicRecommendations, AuthSessions (모두 1:N)
+
+### 2. RefreshTokens (리프레시 토큰)
+- PK: Id BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- token VARCHAR(700) NOT NULL UNIQUE — JWT 리프레시 토큰 문자열
+- expiresAt TIMESTAMP NOT NULL — 토큰 만료 시각
+- revoked BOOLEAN NOT NULL DEFAULT false — 폐기 여부
+- createdAt TIMESTAMP NOT NULL — 토큰 발급 시각
+
+### 3. Devices (기기)
+- PK: DeviceId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- deviceType VARCHAR(50) NOT NULL — 기기 종류 (예: smartwatch, phone, camera)
+- createdAt TIMESTAMP NOT NULL — 기기 등록 시각
+- updatedAt TIMESTAMP NOT NULL — 마지막 수정 시각
+- 관계: DriveSessions, BioSignals, Emotions (모두 1:N)
+
+### 4. DriveSessions (운전 세션)
+- PK: DriveId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- FK: DeviceId → Devices.DeviceId NOT NULL
+- startedAt TIMESTAMP NOT NULL — 세션 시작 시각
+- endedAt TIMESTAMP NULLABLE — 세션 종료 시각 (NULL이면 진행 중)
+- createdAt TIMESTAMP NOT NULL — 레코드 생성 시각
+- 관계: Emotions, BioSignals, EmotionReports, MusicRecommendations (모두 1:N)
+
+### 5. EmotionTypes (감정 유형 - 참조 테이블)
+- PK: EmotionTypeId SMALLINT
+- name VARCHAR(20) NOT NULL UNIQUE — 감정 레이블
+- 사전 정의 값:
+    0: neutral (중립)
+    1: happy (행복)
+    2: sad (슬픔)
+    3: angry (분노)
+    4: fear (공포)
+    5: disgust (혐오)
+    6: surprise (놀람)
+    7: contempt (경멸)
+    8: drowsy (졸음)
+
+### 6. Emotions (감정 탐지 기록)
+- PK: EmotionId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- FK: DeviceId → Devices.DeviceId NOT NULL
+- FK: DriveId → DriveSessions.DriveId NULLABLE
+- FK: EmotionTypeId → EmotionTypes.EmotionTypeId NOT NULL
+- confidence NUMERIC(4,3) NOT NULL — 감정 탐지 신뢰도 (0.000~1.000)
+- source VARCHAR(20) NOT NULL — 탐지 소스 (camera, sensor 등)
+- modelVersion VARCHAR(50) NOT NULL — 사용된 ML 모델 버전
+- occurredAt TIMESTAMP NOT NULL — 감정 탐지 발생 시각
+- createdAt TIMESTAMP NOT NULL — 레코드 생성 시각
+- payload JSONB NULLABLE — 추가 탐지 데이터 (원시 확률값 등)
+- 관계: CoachingEvents, RelabelQueue, MusicRecommendations (모두 1:N)
+
+### 7. EmotionReports (감정 리포트)
+- PK: ReportId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- FK: DriveId → DriveSessions.DriveId NULLABLE
+- windowStart TIMESTAMP NOT NULL — 리포트 집계 시작 시각
+- windowEnd TIMESTAMP NOT NULL — 리포트 집계 종료 시각
+- specVersion VARCHAR(50) NOT NULL — 리포트 포맷 버전
+- summary JSONB NOT NULL — 감정 통계 요약 데이터
+- generatedAt TIMESTAMP NOT NULL — 리포트 생성 시각
+- sourceHash VARCHAR(64) NULLABLE — 원본 감정 데이터 해시값
+
+### 8. CoachingEvents (코칭 이벤트)
+- PK: CoachingId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- FK: EmotionId → Emotions.EmotionId NULLABLE
+- type VARCHAR(30) NOT NULL — 코칭 유형 (Alert / Tip / Recommendation)
+- message TEXT NOT NULL — GPT-4 생성 코칭 메시지 내용
+- channel VARCHAR(20) NOT NULL — 전달 채널 (APP / Voice / Push)
+- issuedAt TIMESTAMP NOT NULL — 메시지 발송 시각
+- createdAt TIMESTAMP NOT NULL — 레코드 생성 시각
+
+### 9. RelabelQueue (재레이블링 큐)
+- PK: QueueId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- FK: EmotionId → Emotions.EmotionId NOT NULL
+- reason VARCHAR(50) NOT NULL — 큐 등록 사유 (LowConfidence / Conflict)
+- status VARCHAR(20) NOT NULL — 처리 상태 (Open / Labeled / Discarded)
+- createdAt TIMESTAMP NOT NULL — 큐 등록 시각
+
+### 10. BioSignals (생체 신호)
+- PK: BioSignalId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- FK: DeviceId → Devices.DeviceId NOT NULL
+- FK: DriveId → DriveSessions.DriveId NULLABLE
+- signalType VARCHAR(20) NOT NULL — 신호 유형 (HRV, GSR, SpO2 등)
+- value DOUBLE PRECISION NOT NULL — 측정값
+- unit VARCHAR(20) NOT NULL — 단위 (ms, μS 등)
+- measuredAt TIMESTAMP NOT NULL — 측정 시각
+- createdAt TIMESTAMP NOT NULL — 레코드 생성 시각
+- qualityFlag VARCHAR(30) NULLABLE — 데이터 품질 지표
+- attr JSONB NULLABLE — 추가 속성 데이터
+
+### 11. AuthSessions (인증 세션)
+- PK: SessionId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- issuedAt TIMESTAMP NOT NULL — 세션 발급 시각
+- expiresAt TIMESTAMP NOT NULL — 세션 만료 시각
+- ipAddress VARCHAR(45) NULLABLE — 클라이언트 IP 주소 (IPv4/IPv6)
+- userAgent TEXT NULLABLE — 클라이언트 User-Agent 문자열
+
+### 12. MusicRecommendations (음악 추천)
+- PK: RecommendationId BIGSERIAL
+- FK: UserId → Users.UserId NOT NULL
+- FK: EmotionId → Emotions.EmotionId NULLABLE
+- FK: DriveId → DriveSessions.DriveId NULLABLE
+- emotionName VARCHAR(30) NOT NULL — 추천을 트리거한 감정명
+- genre VARCHAR(50) NOT NULL — 추천 음악 장르
+- playlistId VARCHAR(100) NULLABLE — Spotify 플레이리스트 ID
+- playlistName VARCHAR(255) NULLABLE — 플레이리스트 이름
+- playlistUrl VARCHAR(500) NULLABLE — Spotify 플레이리스트 URL
+- issuedAt TIMESTAMP NOT NULL — 추천 발급 시각
+- createdAt TIMESTAMP NOT NULL — 레코드 생성 시각
+
+---
+
+## 엔티티 관계 요약
+
+```
+Users (루트)
+├── RefreshTokens (1:N) — JWT 인증 토큰 관리
+├── Devices (1:N) — 등록된 기기
+│   ├── DriveSessions (1:N) — 운전 세션
+│   │   ├── Emotions (1:N) — 세션별 감정 탐지
+│   │   │   ├── CoachingEvents (1:N) — 감정 기반 코칭 메시지
+│   │   │   ├── RelabelQueue (1:N) — 저품질 데이터 재레이블링 큐
+│   │   │   └── MusicRecommendations (1:N) — 감정 기반 음악 추천
+│   │   ├── BioSignals (1:N) — 세션별 생체 신호
+│   │   └── EmotionReports (1:N) — 세션 감정 집계 리포트
+│   └── BioSignals (1:N) — 기기별 전체 생체 신호
+├── Emotions (1:N) — 사용자 전체 감정 기록
+├── EmotionReports (1:N) — 사용자 전체 리포트
+├── CoachingEvents (1:N) — 사용자 전체 코칭 이력
+├── MusicRecommendations (1:N) — 사용자 전체 음악 추천 이력
+└── AuthSessions (1:N) — 로그인 세션 이력
+
+EmotionTypes (참조 테이블, 9개 사전 정의 감정)
+```
+
+---
+
+## 작성 요청사항
+
+위 정보를 바탕으로 다음 형식에 따라 데이터 사전을 작성해 주세요:
+
+1. **전체 테이블 목록표**
+   - 테이블명, 한글명, 설명, 레코드 예상 규모
+
+2. **테이블별 컬럼 정의표** (각 테이블마다)
+   - 컬럼명 (영문)
+   - 한글명
+   - 데이터 타입
+   - 길이/정밀도
+   - NULL 허용 여부
+   - PK/FK/UK 여부
+   - 기본값
+   - 설명 (비즈니스 의미, 허용값, 제약 조건 등)
+
+3. **테이블 관계도 설명**
+   - 각 테이블 간 관계 (1:1, 1:N, N:M)
+   - 참조 무결성 규칙
+   - CASCADE 정책
+
+4. **코드성 데이터 정의**
+   - EmotionTypes 사전 정의 값 목록
+   - CoachingEvents.type 허용값
+   - CoachingEvents.channel 허용값
+   - RelabelQueue.reason 허용값
+   - RelabelQueue.status 허용값
+   - BioSignals.signalType 허용값 예시
+
+5. **JSONB 컬럼 스키마 정의**
+   - Emotions.payload 구조 예시
+   - EmotionReports.summary 구조 예시
+   - BioSignals.attr 구조 예시
+
+6. **인덱스 및 성능 고려사항** (권장 인덱스 포함)
+
+출력 형식은 Markdown 테이블을 사용하고, 각 섹션에 명확한 헤더를 붙여주세요.
+한국어로 작성하되, 테이블명/컬럼명 등 기술적 식별자는 영문 원본을 유지해 주세요.
+
+======================================================================
+[프롬프트 끝]
+======================================================================
+
+[사용 방법]
+1. 위 "[프롬프트 시작]"부터 "[프롬프트 끝]"까지의 내용을 복사합니다.
+2. ChatGPT, Claude 등 AI 어시스턴트에 붙여넣고 실행합니다.
+3. 생성된 데이터 사전을 Word, Notion, Confluence 등에 붙여넣어 활용합니다.
+4. 실제 DB 스키마와 대조하여 누락된 컬럼이나 제약 조건을 보완합니다.
+
+[참고 파일 위치]
+- 엔티티 클래스: src/main/java/com/graduation/fer/domain/
+- 스키마 SQL: src/main/resources/db/schema.sql
+- 설정 파일: src/main/resources/application.properties
